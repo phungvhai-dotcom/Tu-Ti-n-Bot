@@ -50,6 +50,10 @@ bequan_data = {}
 
 user_dandien = {}
 
+# Cache để lưu channel object tạm thời (không save vào JSON)
+
+bequan_channels = {}
+
 
 
 # ================= SAVE =================
@@ -80,13 +84,47 @@ def load_data():
 
 def save_data():
 
+    # Tạo copy của bequan_data để save (không lưu object)
+
+    bequan_data_to_save = {}
+
+    for uid, bq in bequan_data.items():
+
+        bequan_data_to_save[uid] = {
+
+            "end": bq["end"],
+
+            "total_gain": bq["total_gain"],
+
+            "minutes": bq["minutes"],
+
+            "channel_id": bq["channel_id"],
+
+            "member_id": bq["member_id"],
+
+            "no_gain_until": bq["no_gain_until"],
+
+            "initial_exp": bq["initial_exp"],
+
+            "tauho_count": bq["tauho_count"],
+
+            "exp_gained": bq["exp_gained"],
+
+            "last_update": bq["last_update"],
+
+            "progress_msg_id": bq["progress_msg_id"]
+
+        }
+
+    
+
     with open("data.json", "w", encoding="utf-8") as f:
 
         json.dump({
 
             "data": data,
 
-            "bequan_data": bequan_data,
+            "bequan_data": bequan_data_to_save,
 
             "user_dandien": user_dandien
 
@@ -351,6 +389,26 @@ async def on_ready():
         name="tu luyện | !help"
 
     ))
+
+    
+
+    # Load lại channel objects cho bequan đang chạy
+
+    for uid in list(bequan_data.keys()):
+
+        bq = bequan_data[uid]
+
+        try:
+
+            channel = bot.get_channel(bq["channel_id"])
+
+            if channel:
+
+                bequan_channels[uid] = channel
+
+        except:
+
+            pass
 
 
 
@@ -906,7 +964,7 @@ async def bequan(ctx, minutes: int = None):
 
 
 
-    # SỬA LỖI 2: Lưu đủ thông tin để tránh bị đóng băng
+    # SỬA LỖI 2: Lưu ID thay vì object
 
     bequan_data[uid] = {
 
@@ -916,11 +974,9 @@ async def bequan(ctx, minutes: int = None):
 
         "minutes": minutes,
 
-        "msg": msg,
+        "channel_id": ctx.channel.id,
 
-        "channel": ctx.channel,
-
-        "member": ctx.author,
+        "member_id": ctx.author.id,
 
         "no_gain_until": 0,
 
@@ -932,9 +988,15 @@ async def bequan(ctx, minutes: int = None):
 
         "last_update": time.time(),
 
-        "progress_msg": None
+        "progress_msg_id": None
 
     }
+
+    
+
+    # Lưu channel object trong cache
+
+    bequan_channels[uid] = ctx.channel
 
 
 
@@ -1070,37 +1132,65 @@ async def bequan_loop():
 
 
 
-                embed = create_embed(
+                # Lấy channel từ cache hoặc từ ID
 
-                    "🧘 Bế Quan Hoàn Tất",
+                channel = bequan_channels.get(uid)
 
-                    f"{bq['member'].mention} kết thúc bế quan!",
+                if not channel:
 
-                    discord.Color.green(),
+                    channel = bot.get_channel(bq["channel_id"])
 
-                    [
+                
 
-                        ("Thời gian", f"{bq['minutes']} phút", True),
+                if channel:
 
-                        ("Tu vi ban đầu", f"{int(bq['initial_exp'])}", True),
+                    embed = create_embed(
 
-                        ("Tu vi tăng", f"**+{int(bq['exp_gained'])}** ✨", True),
+                        "🧘 Bế Quan Hoàn Tất",
 
-                        ("Số lần tẩu hỏa", f"🔥 {bq['tauho_count']} lần", True),
+                        f"Kết thúc bế quan!",
 
-                        ("Tu vi cuối cùng", f"**{int(final_exp)}**", True),
+                        discord.Color.green(),
 
-                        ("Đan điền", f"{get_dandien(uid)['name']} (x{get_dandien(uid)['mult']})", True)
+                        [
 
-                    ]
+                            ("Thời gian", f"{bq['minutes']} phút", True),
 
-                )
+                            ("Tu vi ban đầu", f"{int(bq['initial_exp'])}", True),
+
+                            ("Tu vi tăng", f"**+{int(bq['exp_gained'])}** ✨", True),
+
+                            ("Số lần tẩu hỏa", f"🔥 {bq['tauho_count']} lần", True),
+
+                            ("Tu vi cuối cùng", f"**{int(final_exp)}**", True),
+
+                            ("Đan điền", f"{get_dandien(uid)['name']} (x{get_dandien(uid)['mult']})", True)
+
+                        ]
+
+                    )
 
 
 
-                await bq["channel"].send(embed=embed)
+                    try:
+
+                        await channel.send(embed=embed)
+
+                    except:
+
+                        pass
+
+                
+
+                # Xóa khỏi bequan_data
 
                 del bequan_data[uid]
+
+                if uid in bequan_channels:
+
+                    del bequan_channels[uid]
+
+                
 
                 save_data()
 
@@ -1120,19 +1210,37 @@ async def bequan_loop():
 
                     
 
-                    embed = create_embed(
+                    # Lấy channel từ cache hoặc từ ID
 
-                        "🔥 Tẩu Hỏa!",
+                    channel = bequan_channels.get(uid)
 
-                        f"{bq['member'].mention} bị tẩu hỏa trong bế quan!\n⛔ 5 phút tiếp theo sẽ không nhận tu vi!",
+                    if not channel:
 
-                        discord.Color.red()
-
-                    )
+                        channel = bot.get_channel(bq["channel_id"])
 
                     
 
-                    await bq["channel"].send(embed=embed)
+                    if channel:
+
+                        embed = create_embed(
+
+                            "🔥 Tẩu Hỏa!",
+
+                            f"Bị tẩu hỏa trong bế quan!\n⛔ 5 phút tiếp theo sẽ không nhận tu vi!",
+
+                            discord.Color.red()
+
+                        )
+
+                        
+
+                        try:
+
+                            await channel.send(embed=embed)
+
+                        except:
+
+                            pass
 
 
 
@@ -1160,7 +1268,7 @@ async def bequan_loop():
 
                     "🧘 Tiến Trình Bế Quan",
 
-                    f"{bq['member'].mention}",
+                    "",
 
                     discord.Color.blue(),
 
@@ -1184,19 +1292,49 @@ async def bequan_loop():
 
 
 
-                try:
+                # Lấy channel từ cache hoặc từ ID
 
-                    if bq["progress_msg"]:
+                channel = bequan_channels.get(uid)
 
-                        await bq["progress_msg"].edit(embed=progress_embed)
+                if not channel:
 
-                    else:
+                    channel = bot.get_channel(bq["channel_id"])
 
-                        bq["progress_msg"] = await bq["channel"].send(embed=progress_embed)
+                
 
-                except:
+                if channel:
 
-                    bq["progress_msg"] = await bq["channel"].send(embed=progress_embed)
+                    try:
+
+                        # Nếu có progress_msg_id, edit nó
+
+                        if bq["progress_msg_id"]:
+
+                            try:
+
+                                msg = await channel.fetch_message(bq["progress_msg_id"])
+
+                                await msg.edit(embed=progress_embed)
+
+                            except:
+
+                                # Nếu message bị xóa, tạo message mới
+
+                                msg = await channel.send(embed=progress_embed)
+
+                                bq["progress_msg_id"] = msg.id
+
+                        else:
+
+                            # Tạo message mới
+
+                            msg = await channel.send(embed=progress_embed)
+
+                            bq["progress_msg_id"] = msg.id
+
+                    except:
+
+                        pass
 
 
 
